@@ -7,12 +7,28 @@ set -e
 
 PR_NUMBER=$1
 
+# Auto-detect repository from git remote
+REPO_URL=$(git remote get-url origin 2>/dev/null || echo "")
+if [ -z "$REPO_URL" ]; then
+    echo "❌ Error: Could not detect GitHub repository. Make sure you're in a git repository with a GitHub remote."
+    exit 1
+fi
+
+# Extract owner/repo from GitHub URL (supports both SSH and HTTPS)
+REPO_PATH=$(echo "$REPO_URL" | sed -E 's|^.*github\.com[:/]||' | sed 's|\.git$||')
+if [ -z "$REPO_PATH" ]; then
+    echo "❌ Error: Could not parse GitHub repository from URL: $REPO_URL"
+    exit 1
+fi
+
+echo "🔍 Detected repository: $REPO_PATH"
+
 if [ -z "$PR_NUMBER" ]; then
     echo "❌ Error: Please provide a PR number"
     echo "Usage: $0 <PR_NUMBER>"
     echo ""
     echo "Available open PRs:"
-    curl -s "https://api.github.com/repos/swiftymind/CodeRabbitTest/pulls?state=open" | grep -E '"number"|"title"' | sed 'N;s/\n/ /' | sed 's/.*"number": \([0-9]*\),.*"title": "\([^"]*\)".*/  PR #\1: \2/'
+    curl -s "https://api.github.com/repos/$REPO_PATH/pulls?state=open" | grep -E '"number"|"title"' | sed 'N;s/\n/ /' | sed 's/.*"number": \([0-9]*\),.*"title": "\([^"]*\)".*/  PR #\1: \2/'
     exit 1
 fi
 
@@ -20,7 +36,7 @@ echo "🔍 Reviewing PR #$PR_NUMBER..."
 echo ""
 
 # Get PR details
-PR_INFO=$(curl -s "https://api.github.com/repos/swiftymind/CodeRabbitTest/pulls/$PR_NUMBER")
+PR_INFO=$(curl -s "https://api.github.com/repos/$REPO_PATH/pulls/$PR_NUMBER")
 PR_TITLE=$(echo "$PR_INFO" | grep '"title"' | cut -d'"' -f4)
 PR_STATE=$(echo "$PR_INFO" | grep '"state"' | cut -d'"' -f4)
 
@@ -50,7 +66,7 @@ fi
 
 # Fetch PR file changes
 echo "🔍 Fetching changed files..."
-PR_FILES=$(curl -s "https://api.github.com/repos/swiftymind/CodeRabbitTest/pulls/$PR_NUMBER/files")
+PR_FILES=$(curl -s "https://api.github.com/repos/$REPO_PATH/pulls/$PR_NUMBER/files")
 
 # Count files changed
 FILES_COUNT=$(echo "$PR_FILES" | jq '. | length')
@@ -339,6 +355,6 @@ echo "   • Focus areas: Swift conventions, Security, Best practices, Code qual
 echo "   • Swift conventions source: swift-conventions.mdc"
 echo "   • Comments posted: Check PR on GitHub"
 echo ""
-echo "🌐 View PR with comments: https://github.com/swiftymind/CodeRabbitTest/pull/$PR_NUMBER"
+echo "🌐 View PR with comments: https://github.com/$REPO_PATH/pull/$PR_NUMBER"
 echo ""
 echo "💡 This automated review supplements human review - always verify suggestions!" 
