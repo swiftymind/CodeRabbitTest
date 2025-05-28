@@ -40,5 +40,5 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: scripts/swift-analyzer.py
+        run: python scripts/swift-analyzer.py
         # Executes the Python script that analyzes Swift/SwiftUI code changes and comments on the PR.
