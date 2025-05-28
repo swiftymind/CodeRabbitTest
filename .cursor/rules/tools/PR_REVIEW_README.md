@@ -146,8 +146,7 @@ esac
 .cursor/rules/
 ├── tools/
 │   ├── gh-pr-comment.sh      # Core comment posting script
-│   ├── review-pr.sh          # Main review orchestration script
-│   └── fetch_pr_diff.py      # PR diff fetching utility
+│   └── review-pr.sh          # Main review orchestration script
 ├── github-pr-review.mdc      # Review guidelines
 └── PR_REVIEW_README.md       # This documentation
 ```

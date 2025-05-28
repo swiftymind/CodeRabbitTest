@@ -49,21 +49,23 @@ __new hunk__
 - If you cannot find any actionable comments, return an empty array.
 - VERY IMPORTANT: Keep in mind you're only seeing part of the code, and the code might be incomplete. Do not make assumptions about the code outside the diff.
 - Do not give positive comments or compliments.
-- Use fetch_pr_diff tool first to review the code and then generate the JSON response in following JSON format:  {"reviews": [{"filePath": <file_path>, "lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
+- Generate the JSON response in following JSON format:  {"reviews": [{"filePath": <file_path>, "lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 
 
 ## Tools
 You can utilize these tools.
  - GitHub CLI
+ - Enhanced PR Review Script
 
- ```bash
-# cd aaisp-frontend && gh pr diff <PR_NUMBER> | grep "^+" | cat
-# cd aaisp-frontend && gh pr diff <PR_NUMBER> | cat
- cd aaisp-frontend && python3 ../tools/fetch_pr_diff.py
+```bash
+# Get PR diff using GitHub CLI
+gh pr diff <PR_NUMBER> | cat
+
+# Run complete automated PR review (includes Swift conventions)
+./.cursor/rules/tools/review-pr.sh <PR_NUMBER>
 ```
 
-
-Use the json from given Prompt to comment on PR. Use command like this for each review comment like this. 
+Use the JSON from given prompt to comment on PR. Use command like this for each review comment:
 ```bash
-cd aaisp-frontend && ../tools/gh-pr-comment.sh pr review <PR_NUMBER> --comment -b <review comment> --path <FILE_PATH> --line <LINE_NUMBER>
+./.cursor/rules/tools/gh-pr-comment.sh pr review <PR_NUMBER> --comment -b "<review comment>" --path <FILE_PATH> --line <LINE_NUMBER>
 ```
