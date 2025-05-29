@@ -1,0 +1,38 @@
+# swift-analysis.yml: AI-Powered Swift/SwiftUI Code Review Workflow
+# Triggers on all PRs (any branch) and runs swift-analyzer.py for a PR summary review.
+
+name: Swift AI Code Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: ['**']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai_review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install openai requests
+
+      - name: Run Swift analyzer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4o-mini
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/swift-analyzer.py
