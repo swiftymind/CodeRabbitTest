@@ -1,0 +1,40 @@
+# code-reviewer.yml: Comprehensive AI-Powered Code Review for iOS/Swift Projects
+# This workflow runs a unified Python script that provides both inline code review comments
+# and high-level architectural analysis in a single, efficient execution
+
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: ['**']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai_code_review:
+    name: "AI Code Review"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install openai requests
+
+      - name: Run comprehensive AI code reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4o
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/ai-code-reviewer.py
