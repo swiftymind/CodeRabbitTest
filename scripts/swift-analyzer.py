@@ -68,10 +68,12 @@ def post_pr_comment(comment):
 
 def main():
     files = fetch_pr_files()
+    print(f"📄 Files fetched: {[f['filename'] for f in files]}")
     if not files:
         print("No files to review.")
         return
     review_comment = analyze_code(files)
+    print("📝 AI Review Content:", review_comment)
     post_pr_comment(review_comment)
 
 if __name__ == "__main__":
