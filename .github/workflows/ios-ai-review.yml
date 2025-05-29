@@ -1,0 +1,43 @@
+# ios-ai-review.yml: GitHub Actions workflow for AI code review on iOS/Swift pull requests
+# This workflow triggers on pull request events for all branches (no hardcoded branch filters)
+# and uses a Node.js script with OpenAI GPT-4 (fallback to GPT-3.5) to provide code review comments.
+
+name: iOS AI Code Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]  # Run on PR creation, updates, or reopening
+    branches: ['**']  # All branches included (no branch name hardcoding)
+
+permissions:
+  contents: read               # Allows reading repository content (for checkout)
+  pull-requests: write         # Required to post review comments to the PR
+
+jobs:
+  ai_review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v3
+        # Checkout the code so the reviewer script can read files if needed
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18    # Use Node 18 (supports top-level await and latest features)
+
+      - name: Install Node dependencies
+        run: npm install axios
+        # Install Axios for HTTP requests (used to call GitHub and OpenAI APIs).
+        # (The OpenAI API will be called via HTTP; no separate OpenAI SDK required)
+
+      - name: Run AI code reviewer (Node.js)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}       # GitHub token to call GitHub API
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}   # OpenAI API key for GPT-4/GPT-3.5
+          OPENAI_MODEL: gpt-4o                             # Preferred model (will fallback to 3.5 if unavailable)
+          PR_NUMBER: ${{ github.event.pull_request.number }}   # Current pull request number
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }} # SHA of the latest commit in the PR
+          GITHUB_REPOSITORY: ${{ github.repository }}      # e.g. "owner/repo", passed to script for API calls
+        run: node scripts/ios-ai-reviewer.js
+        # Executes the Node.js AI reviewer script, which will analyze changes and post inline comments.
