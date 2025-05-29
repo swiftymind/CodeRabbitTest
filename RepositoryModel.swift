@@ -42,7 +42,7 @@ struct Repository: Codable, Identifiable {
     let watchers: Int
     let defaultBranch: String
     let score: Double?
-
+    
     enum CodingKeys: String, CodingKey {
         case id
         case nodeId = "node_id"
@@ -107,7 +107,7 @@ struct Owner: Codable {
     let receivedEventsUrl: String
     let type: String
     let siteAdmin: Bool
-
+    
     enum CodingKeys: String, CodingKey {
         case login
         case id
@@ -137,7 +137,7 @@ struct License: Codable {
     let spdxId: String?
     let url: String?
     let nodeId: String
-
+    
     enum CodingKeys: String, CodingKey {
         case key
         case name
@@ -152,7 +152,7 @@ struct SearchResponse: Codable {
     let totalCount: Int
     let incompleteResults: Bool
     let items: [Repository]
-
+    
     enum CodingKeys: String, CodingKey {
         case totalCount = "total_count"
         case incompleteResults = "incomplete_results"
@@ -165,15 +165,15 @@ extension Repository {
     var displayName: String {
         return name
     }
-
+    
     var displayDescription: String {
         return description ?? "No description available"
     }
-
+    
     var displayLanguage: String {
         return language ?? "Unknown"
     }
-
+    
     var formattedStarCount: String {
         if stargazersCount >= 1000 {
             let formatter = NumberFormatter()
@@ -185,7 +185,7 @@ extension Repository {
             return "\(stargazersCount)"
         }
     }
-
+    
     var formattedForkCount: String {
         if forksCount >= 1000 {
             let formatter = NumberFormatter()
@@ -197,15 +197,15 @@ extension Repository {
             return "\(forksCount)"
         }
     }
-
+    
     var lastUpdatedDate: Date? {
         let dateFormatter = ISO8601DateFormatter()
         return dateFormatter.date(from: updatedAt)
     }
-
+    
     var formattedLastUpdated: String {
         guard let lastUpdated = lastUpdatedDate else { return "Unknown" }
-
+        
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: lastUpdated, relativeTo: Date())
