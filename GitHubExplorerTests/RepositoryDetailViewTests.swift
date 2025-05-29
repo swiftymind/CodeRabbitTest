@@ -26,6 +26,8 @@ struct RepositoryDetailViewTests {
     }
 
     // Test Stat Card and Info Row Views
+
+    
     @Test func testStatCardView() {
         // Act
         let view = StatCard(
