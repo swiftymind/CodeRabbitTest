@@ -15,9 +15,10 @@ Features:
 import os
 import re
 import json
+import time
 import requests
 from openai import OpenAI
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 # Environment variables
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
@@ -49,6 +50,17 @@ EXCLUDE_PATTERNS = [
     '.plist', '.lock', '.png', '.jpg', '.jpeg', '.gif', '.pdf',
     '.storyboard', '.xib', '.md', '.json', '.yaml', '.yml'
 ]
+
+# Rate limiting configuration
+API_DELAY = 2.0  # Seconds between API calls to avoid rate limits
+MAX_COMMENTS_PER_FILE = 5  # Limit comments per file to avoid spam
+
+def rate_limited_request(func):
+    """Decorator to add rate limiting to API requests."""
+    def wrapper(*args, **kwargs):
+        time.sleep(API_DELAY)  # Wait before making request
+        return func(*args, **kwargs)
+    return wrapper
 
 def fetch_pr_files() -> List[Dict[str, Any]]:
     """Fetch the list of files changed in the pull request."""
@@ -94,10 +106,11 @@ def categorize_file(filename: str, content: str) -> str:
 
     return 'Config'
 
-def parse_diff_for_review(patch: str) -> List[Dict[str, Any]]:
-    """Parse diff patch to extract context and new lines with line numbers."""
+def parse_diff_for_review(patch: str) -> tuple[List[Dict[str, Any]], Set[int]]:
+    """Parse diff patch to extract context and valid line numbers for comments."""
     lines = patch.split('\n')
     context_lines = []
+    valid_comment_lines = set()  # Track which lines can receive comments
     new_line_number = 0
 
     for line in lines:
@@ -107,7 +120,7 @@ def parse_diff_for_review(patch: str) -> List[Dict[str, Any]]:
             if match:
                 new_line_number = int(match.group(1)) - 1
         elif line.startswith('+'):
-            # New added line
+            # New added line - these can receive comments
             new_line_number += 1
             content = line[1:]  # Remove '+' prefix
             context_lines.append({
@@ -115,6 +128,7 @@ def parse_diff_for_review(patch: str) -> List[Dict[str, Any]]:
                 'content': content,
                 'type': 'added'
             })
+            valid_comment_lines.add(new_line_number)  # Mark as valid for comments
         elif line.startswith(' '):
             # Context line (unchanged)
             new_line_number += 1
@@ -125,7 +139,7 @@ def parse_diff_for_review(patch: str) -> List[Dict[str, Any]]:
             })
         # Skip removed lines (don't increment line number)
 
-    return context_lines[:300]  # Limit context to avoid huge prompts
+    return context_lines[:300], valid_comment_lines  # Limit context to avoid huge prompts
 
 def get_system_message(category: str) -> str:
     """Get specialized system message based on file category."""
@@ -159,12 +173,20 @@ async def review_file_inline(file_data: Dict[str, Any]) -> None:
 
     # Categorize file and parse diff
     category = categorize_file(filename, full_content)
-    context_lines = parse_diff_for_review(patch)
+    context_lines, valid_comment_lines = parse_diff_for_review(patch)
 
     if not context_lines:
+        print(f"⚠️  No context lines found for {filename}")
         return
 
-    # Build context for AI
+    print(f"📝 Found {len(valid_comment_lines)} valid lines for comments in {filename}")
+
+    # Build context for AI - focus on added lines
+    added_lines = [line for line in context_lines if line['type'] == 'added']
+    if not added_lines:
+        print(f"⚠️  No added lines to review in {filename}")
+        return
+
     diff_context = '\n'.join([
         f"Line {line['line_number']}: {line['content']}"
         for line in context_lines
@@ -173,15 +195,21 @@ async def review_file_inline(file_data: Dict[str, Any]) -> None:
     # Construct messages
     system_msg = get_system_message(category)
     user_msg = f"""Review the changes in file "{filename}".
-Provide suggestions as a JSON array with objects containing "line" (number) and "comment" (string) fields.
-Focus on the changed lines and provide clear, actionable feedback.
+Provide suggestions ONLY for the newly added lines (marked with +).
+Return a JSON array with objects containing "line" (number) and "comment" (string) fields.
+Focus on the most critical issues. Maximum {MAX_COMMENTS_PER_FILE} comments.
+
+Valid line numbers for comments: {sorted(list(valid_comment_lines))}
 
 ```
 {diff_context}
 ```"""
 
     try:
-        # Call OpenAI API
+        # Call OpenAI API with rate limiting
+        print(f"🤖 Calling OpenAI API for {filename}...")
+        time.sleep(1)  # Brief delay before API call
+
         response = client.chat.completions.create(
             model=MODEL_INLINE,
             messages=[
@@ -189,7 +217,7 @@ Focus on the changed lines and provide clear, actionable feedback.
                 {"role": "user", "content": user_msg}
             ],
             temperature=0.2,
-            max_tokens=1000
+            max_tokens=800  # Reduced to limit response size
         )
 
         ai_content = response.choices[0].message.content.strip()
@@ -207,11 +235,29 @@ Focus on the changed lines and provide clear, actionable feedback.
                 print(f"⚠️  Non-array response for {filename}")
                 return
 
-            # Post each suggestion as inline comment
+            # Filter and limit suggestions
+            valid_suggestions = []
             for suggestion in suggestions:
                 if not all(key in suggestion for key in ['line', 'comment']):
                     continue
 
+                line_number = suggestion['line']
+
+                # Validate line number is in valid comment lines
+                if line_number not in valid_comment_lines:
+                    print(f"⚠️  Skipping invalid line {line_number} for {filename}")
+                    continue
+
+                valid_suggestions.append(suggestion)
+
+                # Limit number of comments per file
+                if len(valid_suggestions) >= MAX_COMMENTS_PER_FILE:
+                    break
+
+            print(f"📝 Posting {len(valid_suggestions)} valid comments for {filename}")
+
+            # Post each valid suggestion as inline comment
+            for i, suggestion in enumerate(valid_suggestions):
                 line_number = suggestion['line']
                 comment_text = suggestion['comment'].strip()
 
@@ -219,7 +265,8 @@ Focus on the changed lines and provide clear, actionable feedback.
                 if comment_text and not comment_text.endswith(('.', '!', '?')):
                     comment_text += '.'
 
-                # Post comment to GitHub
+                # Post comment to GitHub with rate limiting
+                print(f"📤 Posting comment {i+1}/{len(valid_suggestions)} for {filename}:{line_number}")
                 await post_inline_comment(filename, line_number, comment_text)
 
         except json.JSONDecodeError as e:
@@ -228,8 +275,9 @@ Focus on the changed lines and provide clear, actionable feedback.
     except Exception as e:
         print(f"❌ Error reviewing {filename}: {e}")
 
+@rate_limited_request
 async def post_inline_comment(filename: str, line_number: int, comment: str) -> None:
-    """Post an inline comment to the GitHub PR."""
+    """Post an inline comment to the GitHub PR with rate limiting."""
     payload = {
         'body': comment,
         'commit_id': COMMIT_SHA,
@@ -239,97 +287,172 @@ async def post_inline_comment(filename: str, line_number: int, comment: str) -> 
     }
 
     url = f"https://api.github.com/repos/{OWNER}/{REPO_NAME}/pulls/{PR_NUMBER}/comments"
-    response = requests.post(url, headers=HEADERS, json=payload)
 
-    if response.status_code >= 300:
-        print(f"⚠️  Failed to post comment on {filename}:{line_number} - {response.text}")
-    else:
-        print(f"✅ Posted comment on {filename}:{line_number}")
+    try:
+        response = requests.post(url, headers=HEADERS, json=payload)
+
+        if response.status_code == 201:
+            print(f"✅ Posted comment on {filename}:{line_number}")
+        elif response.status_code == 422:
+            print(f"⚠️  Invalid line number {line_number} for {filename} (line not in diff)")
+        elif response.status_code == 403:
+            print(f"🚫 Rate limited - waiting longer before next request...")
+            time.sleep(10)  # Wait longer if rate limited
+        else:
+            print(f"⚠️  Failed to post comment on {filename}:{line_number} - {response.status_code}")
+
+    except Exception as e:
+        print(f"❌ Exception posting comment on {filename}:{line_number}: {str(e)}")
 
 def generate_architectural_summary(files: List[Dict[str, Any]]) -> str:
     """Generate high-level architectural analysis summary."""
     print("🏗️  Generating architectural analysis...")
 
-    file_list = "\n".join([f"- {f['filename']}" for f in files])
+    # Create a more detailed file analysis for the prompt
+    file_details = []
+    for file_data in files:
+        filename = file_data['filename']
+        additions = file_data.get('additions', 0)
+        deletions = file_data.get('deletions', 0)
+        file_details.append(f"- {filename} (+{additions}/-{deletions} lines)")
 
-    prompt = f"""You are an expert iOS developer and architect.
-Analyze the following pull request and provide a **comprehensive, structured report** with:
+    file_list = "\n".join(file_details)
 
-### 1. Architecture Patterns
-- Review adherence to MVC, MVVM, or SwiftUI architectures
-- Identify areas for architectural improvements with examples
+    prompt = f"""You are an expert iOS developer and architect reviewing a pull request.
 
-### 2. Memory Management
-- Check for potential retain cycles, proper use of weak self
-- State management best practices
-- Suggest improvements with code patterns
-
-### 3. Performance Considerations
-- Identify potential bottlenecks or inefficiencies
-- Recommend optimizations (lazy loading, Combine, etc.)
-
-### 4. UI/UX Review
-- Accessibility compliance
-- Adaptive layouts and SwiftUI view hierarchy
-- User experience improvements
-
-### 5. Code Quality & Maintainability
-- Code readability and documentation
-- Consistent naming conventions
-- Refactoring opportunities
-- Testing improvements
-
-### 6. Security & Best Practices
-- Identify potential security issues
-- Swift/iOS best practice violations
-- Data handling and privacy considerations
-
-### 7. Actionable Recommendations
-- Specific, prioritized action items
-- Implementation suggestions
-- Final conclusion with impact assessment
-
-Files changed:
+**Files Changed ({len(files)} files):**
 {file_list}
 
-Format as **clear, well-structured Markdown** with bullet points and code examples where helpful."""
+Please provide a **comprehensive, structured analysis** covering:
+
+## 📋 Pull Request Summary
+- Brief overview of the changes and their purpose
+- Impact assessment (High/Medium/Low)
+
+## 🏗️ Architecture & Design
+- Review of architectural patterns (MVC, MVVM, SwiftUI)
+- Design principle adherence (SOLID, Clean Architecture)
+- Suggestions for architectural improvements
+
+## 🧠 Memory & Performance
+- Memory management best practices
+- Potential retain cycles or leaks
+- Performance optimization opportunities
+- Threading and concurrency considerations
+
+## 🎨 UI/UX & Accessibility
+- User interface design patterns
+- SwiftUI best practices (if applicable)
+- Accessibility compliance (VoiceOver, Dynamic Type)
+- Responsive design considerations
+
+## 🔒 Security & Best Practices
+- Data handling and privacy compliance
+- Input validation and error handling
+- API security considerations
+- iOS security best practices
+
+## 🧪 Testing & Quality
+- Test coverage assessment
+- Code maintainability and readability
+- Documentation quality
+- Refactoring opportunities
+
+## ⚡ Action Items
+1. **High Priority**: Critical issues that should be addressed
+2. **Medium Priority**: Important improvements
+3. **Low Priority**: Nice-to-have optimizations
+
+## 🎯 Overall Assessment
+- Code quality score (1-10)
+- Readiness for merge (Ready/Needs Changes/Major Revisions)
+- Key strengths and areas for improvement
+
+Format as **clear Markdown** with emojis, bullet points, and code examples where helpful."""
 
     try:
+        print("🤖 Calling OpenAI API for architectural analysis...")
         response = client.chat.completions.create(
             model=MODEL_SUMMARY,
             messages=[
-                {"role": "system", "content": "You are an expert Swift/SwiftUI architect and code reviewer."},
+                {"role": "system", "content": "You are an expert Swift/SwiftUI architect and code reviewer with 10+ years of iOS development experience."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1200,
-            temperature=0.2
+            max_tokens=1500,  # Increased for more comprehensive analysis
+            temperature=0.1   # Lower temperature for more consistent analysis
         )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"❌ Error generating architectural analysis: {e}"
 
-def post_summary_comment(content: str) -> None:
-    """Post the architectural summary as a PR comment."""
-    # Add header to distinguish from inline comments
-    full_comment = f"""## 🏗️ AI Architectural Analysis
+        summary_content = response.choices[0].message.content.strip()
+        print("✅ Successfully generated architectural analysis")
+        return summary_content
+
+    except Exception as e:
+        error_msg = f"❌ Error generating architectural analysis: {str(e)}"
+        print(error_msg)
+
+        # Return a basic fallback summary
+        return f"""## 🏗️ AI Architectural Analysis
+
+**Note**: Error occurred during analysis generation.
+
+### Files Reviewed
+{file_list}
+
+### Status
+Analysis could not be completed due to: {str(e)}
+
+Please review the inline comments for detailed feedback on individual files."""
+
+@rate_limited_request
+def post_summary_comment(content: str) -> bool:
+    """Post the architectural summary as a PR comment. Returns True if successful."""
+    print("📝 Posting architectural summary to PR...")
+
+    # Enhanced header with more context
+    full_comment = f"""# 🤖 AI Code Review Summary
 
 {content}
 
 ---
-*This analysis was generated by AI and should be reviewed by human developers.*"""
+> 💡 **Note**: This analysis was generated by AI and should be reviewed by human developers.
+>
+> 🔍 **Inline Comments**: Check individual file diffs for detailed line-by-line feedback.
+>
+> 📅 **Generated**: {os.getenv('GITHUB_SHA', 'Unknown commit')[:7]}"""
 
     url = f"https://api.github.com/repos/{OWNER}/{REPO_NAME}/issues/{PR_NUMBER}/comments"
     payload = {"body": full_comment}
 
-    response = requests.post(url, headers=HEADERS, json=payload)
-    if response.status_code >= 300:
-        print(f"❌ Failed to post summary comment: {response.text}")
-    else:
-        print("✅ Posted architectural analysis summary")
+    try:
+        response = requests.post(url, headers=HEADERS, json=payload)
+
+        if response.status_code == 201:
+            print("✅ Successfully posted architectural analysis summary to PR")
+            return True
+        elif response.status_code == 403:
+            print("🚫 Rate limited when posting summary - waiting and retrying...")
+            time.sleep(15)  # Wait longer for summary
+
+            # Retry once
+            response = requests.post(url, headers=HEADERS, json=payload)
+            if response.status_code == 201:
+                print("✅ Successfully posted summary after retry")
+                return True
+            else:
+                print(f"❌ Failed summary retry: {response.status_code}")
+                return False
+        else:
+            print(f"❌ Failed to post summary comment: {response.status_code} - {response.text[:200]}")
+            return False
+
+    except Exception as e:
+        print(f"❌ Exception posting summary comment: {str(e)}")
+        return False
 
 async def main():
     """Main execution function."""
     print("🚀 Starting comprehensive AI code review...")
+    print(f"⚙️  Rate limiting: {API_DELAY}s between requests, max {MAX_COMMENTS_PER_FILE} comments per file")
 
     # Fetch PR files
     files = fetch_pr_files()
@@ -337,26 +460,87 @@ async def main():
         print("ℹ️  No files found in PR")
         return
 
+    print(f"📊 Total files in PR: {len(files)}")
+
     # Filter files for review
     files_to_review = [f for f in files if should_review_file(f)]
 
     if not files_to_review:
         print("ℹ️  No files to review after filtering")
+        # Still post a summary even if no files to review
+        summary = """## 🏗️ AI Code Review Summary
+
+**Status**: No reviewable code files found in this PR.
+
+The PR may contain only:
+- Binary files (images, assets)
+- Configuration files
+- Documentation files
+
+No code review comments were generated."""
+        post_summary_comment(summary)
         return
 
-    print(f"📁 Files to review: {[f['filename'] for f in files_to_review]}")
+    print(f"📁 Files selected for review: {[f['filename'] for f in files_to_review]}")
 
     # 1. Perform inline reviews for each file
     print("\n🔍 Starting inline code reviews...")
-    for file_data in files_to_review:
-        await review_file_inline(file_data)
+    total_comments_posted = 0
 
-    # 2. Generate and post architectural summary
-    print("\n🏗️  Generating architectural summary...")
-    summary = generate_architectural_summary(files_to_review)
-    post_summary_comment(summary)
+    for i, file_data in enumerate(files_to_review, 1):
+        print(f"\n📄 Processing file {i}/{len(files_to_review)}: {file_data['filename']}")
+        try:
+            await review_file_inline(file_data)
 
-    print("\n✅ Code review complete!")
+            # Add delay between files to avoid overwhelming GitHub API
+            if i < len(files_to_review):  # Don't delay after last file
+                print(f"⏸️  Waiting {API_DELAY}s before next file...")
+                time.sleep(API_DELAY)
+
+        except Exception as e:
+            print(f"❌ Error processing {file_data['filename']}: {str(e)}")
+            continue
+
+    # 2. Generate and post architectural summary (always attempt this)
+    print(f"\n🏗️  Generating architectural summary for {len(files_to_review)} files...")
+    try:
+        print("⏸️  Waiting before summary generation...")
+        time.sleep(3)  # Extra wait before summary
+
+        summary = generate_architectural_summary(files_to_review)
+        success = post_summary_comment(summary)
+
+        if not success:
+            print("⚠️  Retrying summary post with simplified content...")
+            # Fallback: post a simple summary
+            simple_summary = f"""## 🏗️ AI Code Review Summary
+
+**Files Reviewed**: {len(files_to_review)} files
+- {chr(10).join([f"• {f['filename']}" for f in files_to_review])}
+
+**Status**: Analysis completed with rate limiting. Check inline comments for specific feedback.
+
+*Note: Simplified summary due to API limitations.*"""
+
+            time.sleep(5)  # Wait before retry
+            post_summary_comment(simple_summary)
+
+    except Exception as e:
+        print(f"❌ Critical error in summary generation: {str(e)}")
+        # Always try to post something
+        error_summary = f"""## 🏗️ AI Code Review Summary
+
+**Error**: Summary generation failed: {str(e)}
+
+**Files in PR**: {len(files_to_review)} reviewable files found.
+
+Please check individual file comments for detailed feedback."""
+
+        time.sleep(3)
+        post_summary_comment(error_summary)
+
+    print(f"\n✅ Code review process complete!")
+    print(f"📈 Processed {len(files_to_review)} files with rate limiting")
 
 if __name__ == "__main__":
     import asyncio
