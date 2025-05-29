@@ -1,0 +1,44 @@
+# swift-analysis.yml: GitHub Actions workflow for Swift/SwiftUI code analysis with AI
+# This workflow triggers on all pull requests (any branch) and runs a Python script that uses OpenAI to review code.
+# It provides additional SwiftUI-specific feedback and handles multiple file categories (Swift, UI, tests, config).
+
+name: Swift Analysis AI Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: ['**']  # No branch restriction – runs for PRs to any branch
+
+permissions:
+  contents: read
+  pull-requests: write  # Needed for posting review comments on the PR
+
+jobs:
+  swift_review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v3
+        # Ensure the code is checked out so the analyzer can read file contents if necessary.
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'  # Use Python 3.11 (or any 3.x)
+
+      - name: Install Python dependencies
+        run: pip install openai requests
+        # Install required libraries:
+        #  - openai: for calling OpenAI's Chat API
+        #  - requests: for making HTTP calls to GitHub API
+
+      - name: Run Swift analyzer (Python)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}       # GitHub token for API access (to list files, post comments)
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}   # OpenAI API key for GPT
+          OPENAI_MODEL: gpt-4o                             # Preferred model (GPT-4), with code fallback to GPT-3.5
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/swift-analyzer.py
+        # Executes the Python script that analyzes Swift/SwiftUI code changes and comments on the PR.
