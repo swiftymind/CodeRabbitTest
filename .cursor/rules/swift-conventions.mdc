@@ -1,0 +1,314 @@
+---
+description: 
+globs: *.swift
+alwaysApply: false
+---
+# Swift Conventions
+
+> **Note**: These rules guide code generation in Cursor. The pre-commit review system in `tools/pre-commit-review/` provides additional quality assurance for all code.
+
+## Core Principles
+
+1. **SOLID Principles**
+   - Ensure that all code follows the SOLID principles to promote maintainability and scalability.
+
+2. **Swift Unit Testing**
+   - Use the Swift Testing framework exclusively for writing unit tests.
+   - Avoid using the XCTest framework.
+   - Do not convert unit tests from Swift Testing framework to XCTest.
+
+3. **Logic Changes and Unit Tests**
+   - When modifying application logic, ensure that the corresponding unit tests are updated accordingly.
+   - UI code changes are exempt from requiring unit test modifications.
+
+4. **Project Structure**
+   - Utilize Swinject for dependency injection during the application's initialization phase.
+
+5. **Swift Linter Dependencies**
+   - If the Swift Linter reports missing dependencies, consult with the team lead to resolve them.
+
+6. **Swift Naming Conventions**
+   - Follow standard Swift naming conventions for variables, functions, classes, and other identifiers to maintain consistency and readability.
+
+7. **Documentation Practices**
+   - When writing new functions, classes, or modifying existing ones, provide comprehensive documentation.
+   - Ensure that all documentation is reviewed and updated to reflect any changes made to the codebase.
+
+# Swift Testing Framework Guide
+
+## Basic Structure
+
+```swift
+import Testing
+
+@Suite struct MyFeatureTests {
+    @Test func testSpecificBehavior() {
+        // Test code here
+        #expect(actualValue == expectedValue)
+    }
+}
+```
+
+## Core Components
+
+1. **Test Suite**: A container for related tests
+   - Mark a struct or class with `@Suite`
+   - Name suites clearly, usually ending with "Tests"
+
+2. **Test Case**: An individual test function
+   - Mark functions with `@Test`
+   - Name should describe what's being tested
+   - Each test should verify one specific behavior
+
+## Setup and Teardown
+
+Unlike some other testing frameworks (like XCTest), Swift Testing framework doesn't have dedicated `@Before` and `@After` macros. Instead, you can use regular instance properties and methods for setup:
+
+```swift
+@Suite struct MyFeatureTests {
+    // Instance properties for shared test state
+    var calculator: Calculator!
+    
+    // Manual setup before each test
+    func setUp() {
+        calculator = Calculator()
+    }
+    
+    @Test func testAddition() {
+        setUp() // Call setup manually
+        let result = calculator.add(2, 3)
+        #expect(result == 5)
+        // Can call tearDown() if needed
+    }
+}
+```
+
+## Assertions
+
+- `#expect(condition)`: Checks condition, continues if fails
+- `#assert(condition)`: Checks condition, stops test if fails
+- `#assertThrows { expression }`: Verifies code throws an error
+- `#assertNoThrow { expression }`: Verifies code doesn't throw
+
+## Best Practices
+
+1. **Test Independence**: Each test should run independently
+2. **Naming Convention**: 
+   - Suites: `FeatureNameTests`
+   - Test methods: Clear names describing what's being tested
+3. **AAA Pattern**: Arrange, Act, Assert
+4. **Test Small Units**: Focus on testing individual components
+5. **Mock Dependencies**: Use protocols and mock implementations
+6. **Clear Failure Messages**: 
+   ```swift
+   #expect(result == 5, "Addition failed: expected 5 but got \(result)")
+   ```
+
+## Asynchronous Testing
+
+```swift
+@Test func testAsyncOperation() async {
+    let result = await performAsyncOperation()
+    #expect(result == expectedValue)
+}
+
+@Test func testWithTimeout() async throws {
+    try await #wait(for: asyncOperation(), timeout: .seconds(5))
+}
+```
+# Architecture Rules (MVVM & SOLID Principles)
+
+## MVVM Compliance
+
+### ViewModels
+- **Never import UIKit directly** in ViewModels unless also importing SwiftUI
+- **Avoid UI-specific code** in ViewModels (UIColor, UIFont, CGRect, UIImage)
+- Use protocols for UI interactions and inject them into ViewModels
+- ViewModels should contain business logic, data binding, and state management only
+- Create data binding interfaces rather than direct UI manipulation
+
+### Views (UIKit & SwiftUI)
+- **Never include business logic** in Views (URLSession, CoreData, UserDefaults.standard)
+- Views should only handle UI presentation, user interaction, and data binding
+- Move all business logic to ViewModels or Service layers
+- Use proper data binding patterns:
+  - SwiftUI: Use `@StateObject` for owned ViewModels, `@ObservedObject` for injected ones
+  - UIKit: Implement proper observation patterns or delegate protocols
+
+### Models
+- **Never import UI frameworks** (UIKit, SwiftUI) in model files
+- Keep models completely independent of presentation layers
+- Models should only contain data structures and data-related logic
+- Use value types (structs) when possible for immutability
+
+### Services
+- **Never contain UI components** in service layers
+- Services should be framework-agnostic and focused on business operations
+- Use protocols for communication with other layers
+- Handle data persistence, networking, and business rules
+
+## SOLID Principles Implementation
+
+### Single Responsibility Principle (SRP)
+- Each class should have only one reason to change
+- Avoid classes that handle multiple concerns (UI + networking + data + business logic)
+- If a class has more than 2-3 distinct responsibilities, split it into focused classes
+- Watch for classes mixing: UI management, network operations, data storage, and business validation
+
+### Open/Closed Principle (OCP)
+- Prefer protocols and polymorphism over large switch statements
+- Design for extension without modification
+- Use protocol-oriented programming for extensibility
+- Avoid hardcoded dependencies that prevent future extensions
+
+### Dependency Inversion Principle (DIP)
+- Depend on abstractions (protocols), not concrete implementations
+- Avoid direct instantiation of concrete classes in business logic
+- Use dependency injection containers (Swinject) for dependency management
+- Inject dependencies through initializers or use dependency injection frameworks
+
+## Dependency Injection Guidelines
+
+### Swinject Usage
+- Always use Swinject container for dependency registration and resolution
+- If importing Swinject, ensure you're actually using Container, .resolve(), or .register()
+- Remove unused Swinject imports
+
+### Service Creation
+- **Avoid manual service creation** in ViewModels (e.g., `let service = SomeService()`)
+- Instead, inject services through initializers or use Swinject container
+- Use protocols to define service interfaces for better testability
+
+## UI Framework Consistency
+
+### Framework Separation
+- **Avoid mixing UIKit and SwiftUI** in the same file unless creating proper bridges
+- Use `UIViewRepresentable` or `UIViewControllerRepresentable` for SwiftUI-UIKit bridging
+- Keep UI framework choices consistent within feature modules
+- If bridging is necessary, clearly document the reason and approach
+
+### Proper Bridging
+- When bridging between UIKit and SwiftUI, create dedicated bridge files
+- Name bridge files clearly (e.g., `MapViewBridge.swift`)
+- Follow platform-specific patterns for each framework
+
+# iOS Memory Management Rules
+
+## ARC and Memory Safety
+
+### Retain Cycle Prevention
+- **Always use `[weak self]` or `[unowned self]`** in closures that capture self
+- Be especially careful with:
+  - Completion handlers
+  - Animation blocks
+  - Async operations
+  - Timer callbacks
+- Use `[weak self]` in closures and safely unwrap inside: `guard let self = self else { return }`
+
+### Delegate Pattern Safety
+- **Always declare delegate properties as `weak`** to prevent retain cycles
+- Example: `weak var delegate: MyProtocol?`
+- Never use strong references for delegate properties unless specifically required
+- Document any strong delegate references with clear reasoning
+
+### Timer Management
+- **Never use `self` as direct target** for Timer.scheduledTimer
+- Use weak targets or invalidate timers in `deinit` or `viewDidDisappear`
+- Always invalidate timers to prevent memory leaks
+- Consider using weak references or timer invalidation patterns
+
+### Observer Pattern Safety
+- **Always remove observers** in `deinit` or appropriate lifecycle methods
+- Use `NotificationCenter.default.removeObserver(self)` for cleanup
+- Be careful with KVO observers and remove them properly
+- Consider using weak observer patterns when possible
+
+## Force Unwrapping Guidelines
+
+### Avoid Force Unwrapping
+- **Never use force unwrapping (`!`)** unless absolutely necessary and safe
+- **Never use force casting (`as!`)** without proper validation
+- **Avoid force try (`try!`)** unless the error is truly impossible
+- Use optional binding (`if let`, `guard let`) for safe unwrapping
+- Use nil coalescing operator (`??`) for default values
+
+### Safe Alternatives
+```swift
+// Bad
+let value = optionalValue!
+
+// Good
+guard let value = optionalValue else { return }
+// or
+let value = optionalValue ?? defaultValue
+```
+
+## Deinitializer Requirements
+
+### When to Implement deinit
+- **Always implement `deinit`** when class uses:
+  - Notification observers
+  - Timers
+  - KVO observers
+  - Delegates that need cleanup
+  - Manual resource management
+
+### Cleanup Responsibilities
+- Remove all notification observers
+- Invalidate all timers
+- Remove KVO observers
+- Clean up delegates
+- Cancel ongoing operations (URLSession tasks, etc.)
+
+## Unsafe Operations
+
+### Avoid Manual Memory Management
+- **Never use manual memory management** in Swift code:
+  - Avoid `Unmanaged`
+  - Avoid `CFRetain`/`CFRelease`
+  - Avoid C memory functions (`malloc`, `free`, `calloc`, `realloc`)
+- Use Swift's automatic memory management instead
+- Only use unsafe pointers when absolutely necessary for C interop
+
+### URLSession Management
+- Store URLSession task references when needed for cancellation
+- Cancel tasks in `deinit` if they might outlive the object
+- Use proper session configuration and avoid creating too many sessions
+
+## Memory Management Best Practices
+
+### Property Declarations
+```swift
+// Delegates - always weak
+weak var delegate: MyDelegate?
+
+// Child objects that don't own parent - weak
+weak var parentController: UIViewController?
+
+// Owned objects - strong (default)
+let networkService: NetworkService
+
+// Closures stored as properties - consider weak capture
+var completion: (() -> Void)?
+```
+
+### Closure Best Practices
+```swift
+// Good - weak self capture
+networkService.fetchData { [weak self] result in
+    guard let self = self else { return }
+    self.handleResult(result)
+}
+
+// Bad - strong self capture (potential retain cycle)
+networkService.fetchData { result in
+    self.handleResult(result)
+}
+```
+
+### Lifecycle Management
+- Implement proper setup in `viewDidLoad`/`init`
+- Implement proper cleanup in `deinit`/`viewDidDisappear`
+- Be mindful of object lifecycles and ownership
+- Use instruments to detect memory leaks and retain cycles
+

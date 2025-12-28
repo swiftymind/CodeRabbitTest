@@ -5,6 +5,23 @@
 ## User settings
 xcuserdata/
 
+## compatibility with Xcode 8 and earlier (ignoring not required starting Xcode 9)
+*.xcscmblueprint
+*.xccheckout
+
+## compatibility with Xcode 3 and earlier (ignoring not required starting Xcode 4)
+build/
+DerivedData/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
 ## Obj-C/Swift specific
 *.hmap
 
@@ -49,6 +66,10 @@ playground.xcworkspace
 
 Carthage/Build/
 
+# Accio dependency management
+Dependencies/
+.accio/
+
 # fastlane
 #
 # It is recommended to not store the screenshots in the git repo.
@@ -60,3 +81,56 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Code Injection
+#
+# After new code Injection tools there's a generated folder /iOSInjectionProject
+# https://github.com/johnno1962/injectionforxcode
+
+iOSInjectionProject/
+
+# 🔒 SECURITY: Prevent accidental token commits
+# Environment files containing sensitive data
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+
+# API keys and tokens
+**/config/secrets.yml
+**/config/database.yml
+**/*token*
+**/*secret*
+**/*key*
+**/credentials.json
+**/service-account.json
+
+# GitHub token files
+github_token.txt
+.github_token
+.token
+
+# Response files that might contain sensitive data
+response.json
+api_response.json
+
+# Temporary files that might contain sensitive data
+*.tmp
+*.temp
+**/tmp/**
+
+# IDE and editor files that might contain sensitive data
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
